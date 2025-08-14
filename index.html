@@ -1,31 +1,839 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Temperature</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      background-color: #f0f0f0;
-      margin: 0;
-    }
-    h1 { font-size: 2em; margin-bottom: 20px; }
-    #tempValue {
-      font-size: 5em;
-      color: red;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temperature Monitor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            background-color: #f5f5f5;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            padding: 15px;
+        }
+
+        .current-temp {
+            font-size: 3em;
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .safe { background-color: #d4edda; color: #155724; }
+        .warning { background-color: #fff3cd; color: #856404; }
+        .critical { background-color: #f8d7da; color: #721c24; }
+
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 10px;
+        }
+
+        .alert {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 15px;
+            padding: 5px;
+            background-color: #e2e3e5;
+            border-radius: 5px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+            background: white;
+            border-radius: 8px;
+            padding: 10px;
+            box-sizing: border-box;
+            margin-bottom: 10px;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        button {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            font-size: 1em;
+            margin-top: 10px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .mode-indicator {
+            text-align: center;
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        /* Trend Mode Specific Styles */
+        .trend-content {
+            display: none;
+        }
+
+        .trend-content.active {
+            display: block;
+        }
+
+        .overheating-log {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .overheating-log h3 {
+            margin: 0 0 15px 0;
+            color: #721c24;
+        }
+
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+
+        .log-table th,
+        .log-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        .log-table th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+
+        .log-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        .notes-input {
+            width: 100%;
+            padding: 4px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-size: 0.8em;
+        }
+
+        .no-events {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 20px;
+        }
+
+        .currently-overheating {
+            background-color: #f8d7da;
+            color: #721c24;
+            font-weight: bold;
+        }
+    </style>
 </head>
 <body>
-  <h1>Current Temperature</h1>
-  <div id="tempValue">-- °C</div>
+    <div class="container">
+        <!-- Current Temp -->
+        <div class="current-temp safe" id="currentTemp">-- °C</div>
 
-  <script src="script.js"></script>
+        <!-- Stats -->
+        <div class="stats">
+            <div>Max: <span id="maxTemp">--</span>°C</div>
+            <div>Min: <span id="minTemp">--</span>°C</div>
+            <div>Avg: <span id="avgTemp">--</span>°C</div>
+        </div>
+
+        <!-- Alert -->
+        <div class="alert" id="alertMsg">No alerts</div>
+
+        <!-- Mode Indicator -->
+        <div class="mode-indicator" id="modeIndicator">Live Mode - Last 30 readings</div>
+
+        <!-- Main Graph -->
+        <div class="chart-container">
+            <canvas id="tempChart"></canvas>
+        </div>
+
+        <!-- Trend Mode Content -->
+        <div class="trend-content" id="trendContent">
+            <!-- Timeline Chart -->
+            <div class="chart-container">
+                <canvas id="timelineChart"></canvas>
+            </div>
+
+            <!-- Overheating Event Log -->
+            <div class="overheating-log">
+                <h3>🔥 Overheating Events Log</h3>
+                <div id="eventsTableContainer">
+                    <div class="no-events">No overheating events recorded yet</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <button id="toggleModeBtn">Switch to History Mode</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script>
+        // Mode management
+        const MODES = ['live', 'history', 'trend'];
+        let currentModeIndex = 0;
+        
+        // Data storage
+        let historyData = [];
+        let historyLabels = [];
+        let historyTimestamps = [];
+        
+        // Overheating event tracking
+        let overheatEvents = [];
+        let currentOverheatEvent = null;
+        const OVERHEAT_THRESHOLD = 45; // °C
+        
+        // Simulation control
+        let lastOverheatTime = 0;
+        let nextOverheatDelay = getRandomOverheatDelay();
+        let simulatedOverheatEvent = null;
+
+        // Chart instances
+        let tempChart = null;
+        let timelineChart = null;
+
+        // Helper functions
+        function getCurrentMode() {
+            return MODES[currentModeIndex];
+        }
+
+        function getRandomOverheatDelay() {
+            // Random delay between 10-15 minutes (600-900 seconds)
+            return (600 + Math.random() * 300) * 1000;
+        }
+
+        function formatDuration(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        }
+
+        function formatTime(timestamp) {
+            return new Date(timestamp).toLocaleTimeString();
+        }
+
+        function formatDate(timestamp) {
+            return new Date(timestamp).toLocaleDateString();
+        }
+
+        // Initialize main temperature chart
+        function initMainChart() {
+            const ctx = document.getElementById('tempChart').getContext('2d');
+            tempChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Temperature (°C)',
+                        data: [],
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)', // Fixed blue background
+                        fill: 'origin',
+                        tension: 0.3,
+                        pointRadius: 3,
+                        pointHoverRadius: 5,
+                        pointBackgroundColor: '#007bff',
+                        pointBorderColor: '#0056b3'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 200
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    scales: {
+                        y: {
+                            min: 20,
+                            max: 80,
+                            grid: { color: 'rgba(0,0,0,0.1)' },
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '°C';
+                                }
+                            }
+                        },
+                        x: {
+                            type: 'category',
+                            ticks: { 
+                                maxRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 10
+                            },
+                            grid: { color: 'rgba(0,0,0,0.1)' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        zoom: {
+                            limits: { x: {min: 0, max: 'original', minRange: 5} },
+                            zoom: {
+                                wheel: { enabled: false },
+                                pinch: { enabled: false },
+                                mode: 'x'
+                            },
+                            pan: {
+                                enabled: false,
+                                mode: 'x'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initialize timeline chart for trend mode
+        function initTimelineChart() {
+            const ctx = document.getElementById('timelineChart').getContext('2d');
+            timelineChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Temperature Timeline',
+                        data: [],
+                        borderColor: '#28a745',
+                        backgroundColor: 'rgba(40, 167, 69, 0.2)', // Fixed green background
+                        fill: 'origin',
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#28a745',
+                        pointBorderColor: '#155724'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 0 },
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    scales: {
+                        y: {
+                            min: 20,
+                            max: 80,
+                            grid: { color: 'rgba(0,0,0,0.1)' },
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '°C';
+                                }
+                            }
+                        },
+                        x: {
+                            type: 'category',
+                            title: {
+                                display: true,
+                                text: 'Time of Day'
+                            },
+                            ticks: { 
+                                maxRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 12
+                            },
+                            grid: { color: 'rgba(0,0,0,0.1)' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: function(context) {
+                                    const temp = context.parsed.y;
+                                    if (temp >= OVERHEAT_THRESHOLD) {
+                                        return '🔥 Hot Zone!';
+                                    }
+                                    return '';
+                                }
+                            }
+                        },
+                        zoom: {
+                            zoom: {
+                                wheel: { enabled: true },
+                                pinch: { enabled: true },
+                                mode: 'x'
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update chart colors based on temperature data
+        function updateChartColors() {
+            if (!tempChart || historyData.length === 0) return;
+
+            const currentMode = getCurrentMode();
+            let dataToColor, chartToUpdate;
+
+            // Determine which data to use based on mode
+            if (currentMode === 'live') {
+                dataToColor = historyData.slice(-30);
+                chartToUpdate = tempChart;
+            } else if (currentMode === 'history') {
+                dataToColor = historyData;
+                chartToUpdate = tempChart;
+            } else if (currentMode === 'trend') {
+                dataToColor = historyData.slice(-60);
+                chartToUpdate = tempChart;
+            }
+
+            // Update point colors for main chart - RED for overheating points
+            const pointColors = dataToColor.map(temp => 
+                temp >= OVERHEAT_THRESHOLD ? '#dc3545' : '#007bff'
+            );
+            const pointBorderColors = dataToColor.map(temp => 
+                temp >= OVERHEAT_THRESHOLD ? '#bd2130' : '#0056b3'
+            );
+
+            chartToUpdate.data.datasets[0].pointBackgroundColor = pointColors;
+            chartToUpdate.data.datasets[0].pointBorderColor = pointBorderColors;
+
+            // Update timeline chart colors if in trend mode - RED for overheating points
+            if (getCurrentMode() === 'trend' && timelineChart) {
+                const timelinePointColors = historyData.map(temp => 
+                    temp >= OVERHEAT_THRESHOLD ? '#dc3545' : '#28a745'
+                );
+                const timelinePointBorderColors = historyData.map(temp => 
+                    temp >= OVERHEAT_THRESHOLD ? '#bd2130' : '#155724'
+                );
+
+                timelineChart.data.datasets[0].pointBackgroundColor = timelinePointColors;
+                timelineChart.data.datasets[0].pointBorderColor = timelinePointBorderColors;
+                
+                timelineChart.update('none');
+            }
+
+            chartToUpdate.update('none');
+        }
+
+        // Update chart based on current mode
+        function updateChartMode() {
+            const mode = getCurrentMode();
+            const modeIndicator = document.getElementById('modeIndicator');
+            const trendContent = document.getElementById('trendContent');
+            
+            // Hide/show trend content
+            if (mode === 'trend') {
+                trendContent.classList.add('active');
+                updateTimelineChart();
+                updateEventsLog();
+            } else {
+                trendContent.classList.remove('active');
+            }
+
+            // Update main chart
+            const zoomPlugin = tempChart.options.plugins.zoom;
+            
+            if (mode === 'live') {
+                // Live mode: show last 30 points, disable zoom/pan
+                const recentLabels = historyLabels.slice(-30);
+                const recentData = historyData.slice(-30);
+                tempChart.data.labels = recentLabels;
+                tempChart.data.datasets[0].data = recentData;
+                
+                zoomPlugin.zoom.wheel.enabled = false;
+                zoomPlugin.zoom.pinch.enabled = false;
+                zoomPlugin.pan.enabled = false;
+                
+                modeIndicator.textContent = `Live Mode - Last 30 readings (${historyData.length} total)`;
+                tempChart.options.animation.duration = 200;
+            } else if (mode === 'history') {
+                // History mode: show all data, enable zoom/pan
+                tempChart.data.labels = historyLabels;
+                tempChart.data.datasets[0].data = historyData;
+                
+                zoomPlugin.zoom.wheel.enabled = true;
+                zoomPlugin.zoom.pinch.enabled = true;
+                zoomPlugin.pan.enabled = true;
+                
+                modeIndicator.textContent = `History Mode - All ${historyData.length} readings (zoom/scroll enabled)`;
+                tempChart.options.animation.duration = 0;
+            } else if (mode === 'trend') {
+                // Trend mode: show recent data in main chart
+                const recentLabels = historyLabels.slice(-60);
+                const recentData = historyData.slice(-60);
+                tempChart.data.labels = recentLabels;
+                tempChart.data.datasets[0].data = recentData;
+                
+                zoomPlugin.zoom.wheel.enabled = false;
+                zoomPlugin.zoom.pinch.enabled = false;
+                zoomPlugin.pan.enabled = false;
+                
+                modeIndicator.textContent = `Trend Mode - Pattern Analysis (${overheatEvents.length} events logged)`;
+                tempChart.options.animation.duration = 0;
+            }
+            
+            tempChart.update('none');
+            tempChart.resetZoom();
+            
+            // Update colors after chart update
+            updateChartColors();
+        }
+
+        // Update timeline chart for trend mode
+        function updateTimelineChart() {
+            if (!timelineChart || historyData.length === 0) return;
+
+            // Create time-of-day labels from timestamps
+            const timeLabels = historyTimestamps.map(ts => {
+                const date = new Date(ts);
+                return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            });
+
+            timelineChart.data.labels = timeLabels;
+            timelineChart.data.datasets[0].data = historyData;
+            
+            // Update point colors - RED for overheating points
+            const timelinePointColors = historyData.map(temp => 
+                temp >= OVERHEAT_THRESHOLD ? '#dc3545' : '#28a745'
+            );
+            const timelinePointBorderColors = historyData.map(temp => 
+                temp >= OVERHEAT_THRESHOLD ? '#bd2130' : '#155724'
+            );
+
+            timelineChart.data.datasets[0].pointBackgroundColor = timelinePointColors;
+            timelineChart.data.datasets[0].pointBorderColor = timelinePointBorderColors;
+            
+            // Force update with autoscaling
+            timelineChart.update('none');
+            
+            // Reset zoom and fit to all data
+            if (timelineChart.resetZoom) {
+                timelineChart.resetZoom();
+            }
+            
+            // Ensure the chart shows all data by updating the scale with ROUNDED values
+            const minTemp = Math.min(...historyData);
+            const maxTemp = Math.max(...historyData);
+            const padding = (maxTemp - minTemp) * 0.1;
+            
+            // Round the min/max to integers (no decimal places)
+            timelineChart.options.scales.y.min = Math.floor(Math.max(20, minTemp - padding));
+            timelineChart.options.scales.y.max = Math.ceil(Math.min(80, maxTemp + padding));
+            
+            timelineChart.update('none');
+        }
+
+        // Track overheating events
+        function checkOverheatingEvent(temperature, timestamp) {
+            const isOverheating = temperature >= OVERHEAT_THRESHOLD;
+            
+            if (isOverheating && !currentOverheatEvent) {
+                // Start new overheating event
+                currentOverheatEvent = {
+                    startTime: timestamp,
+                    startTemp: temperature,
+                    peakTemp: temperature,
+                    endTime: null,
+                    duration: 0,
+                    notes: '',
+                    isActive: true
+                };
+            } else if (isOverheating && currentOverheatEvent) {
+                // Update peak temperature
+                if (temperature > currentOverheatEvent.peakTemp) {
+                    currentOverheatEvent.peakTemp = temperature;
+                }
+                // Update current duration for active event
+                currentOverheatEvent.duration = Math.round((timestamp - currentOverheatEvent.startTime) / 1000);
+            } else if (!isOverheating && currentOverheatEvent) {
+                // End overheating event
+                currentOverheatEvent.endTime = timestamp;
+                currentOverheatEvent.duration = Math.round((timestamp - currentOverheatEvent.startTime) / 1000);
+                currentOverheatEvent.isActive = false;
+                
+                overheatEvents.push({...currentOverheatEvent});
+                currentOverheatEvent = null;
+            }
+        }
+
+        // Update overheating events log
+        function updateEventsLog() {
+            const container = document.getElementById('eventsTableContainer');
+            
+            // Store current focus and selection to preserve user input
+            const activeElement = document.activeElement;
+            const isInputFocused = activeElement && activeElement.classList.contains('notes-input');
+            let focusedIndex = -1;
+            let selectionStart = 0;
+            let selectionEnd = 0;
+            let inputValue = '';
+            
+            if (isInputFocused) {
+                // Find which input is focused by looking at the onchange attribute
+                const onchangeAttr = activeElement.getAttribute('onchange');
+                if (onchangeAttr) {
+                    const match = onchangeAttr.match(/updateEventNote\((\d+),/);
+                    if (match) {
+                        focusedIndex = parseInt(match[1]);
+                        selectionStart = activeElement.selectionStart;
+                        selectionEnd = activeElement.selectionEnd;
+                        inputValue = activeElement.value;
+                    }
+                }
+            }
+            
+            // Check if we have any events or a current active event
+            const hasActiveEvent = currentOverheatEvent !== null;
+            const totalEvents = overheatEvents.length + (hasActiveEvent ? 1 : 0);
+            
+            if (totalEvents === 0) {
+                container.innerHTML = '<div class="no-events">No overheating events recorded yet</div>';
+                return;
+            }
+
+            let tableHTML = `
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Start Time</th>
+                            <th>Peak Temp</th>
+                            <th>Duration</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            // Add current active event first if it exists
+            if (hasActiveEvent) {
+                const currentDuration = Math.round((Date.now() - currentOverheatEvent.startTime) / 1000);
+                tableHTML += `
+                    <tr class="currently-overheating">
+                        <td>${formatDate(currentOverheatEvent.startTime)}</td>
+                        <td>${formatTime(currentOverheatEvent.startTime)}</td>
+                        <td>${currentOverheatEvent.peakTemp.toFixed(1)}°C</td>
+                        <td>🔥 ${formatDuration(currentDuration)} (ongoing)</td>
+                        <td>Currently overheating...</td>
+                    </tr>
+                `;
+            }
+
+            // Add completed events
+            overheatEvents.forEach((event, index) => {
+                // Use the current input value if this is the focused input
+                const noteValue = (isInputFocused && focusedIndex === index) ? inputValue : event.notes;
+                
+                tableHTML += `
+                    <tr>
+                        <td>${formatDate(event.startTime)}</td>
+                        <td>${formatTime(event.startTime)}</td>
+                        <td>${event.peakTemp.toFixed(1)}°C</td>
+                        <td>${formatDuration(event.duration)}</td>
+                        <td>
+                            <input type="text" class="notes-input" 
+                                   value="${noteValue}" 
+                                   onchange="updateEventNote(${index}, this.value)"
+                                   oninput="updateEventNote(${index}, this.value)"
+                                   placeholder="Add note...">
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tableHTML += '</tbody></table>';
+            container.innerHTML = tableHTML;
+            
+            // Restore focus and selection if an input was focused
+            if (isInputFocused && focusedIndex >= 0 && focusedIndex < overheatEvents.length) {
+                setTimeout(() => {
+                    const inputs = container.querySelectorAll('.notes-input');
+                    if (inputs[focusedIndex]) {
+                        inputs[focusedIndex].focus();
+                        inputs[focusedIndex].setSelectionRange(selectionStart, selectionEnd);
+                    }
+                }, 0);
+            }
+        }
+
+        // Update event note
+        function updateEventNote(eventIndex, note) {
+            if (eventIndex >= 0 && eventIndex < overheatEvents.length) {
+                overheatEvents[eventIndex].notes = note;
+            }
+        }
+
+        // Make updateEventNote globally accessible
+        window.updateEventNote = updateEventNote;
+
+        // Generate realistic temperature with overheating spikes
+        function generateTemperature() {
+            const now = Date.now();
+            let baseTemp = 30 + Math.random() * 15 + Math.sin(now / 10000) * 5;
+
+            // Check if it's time for a simulated overheating event
+            if (now - lastOverheatTime > nextOverheatDelay && !simulatedOverheatEvent) {
+                // Start overheating event
+                simulatedOverheatEvent = {
+                    startTime: now,
+                    duration: (120 + Math.random() * 60) * 1000, // 2-3 minutes
+                    peakTemp: 55 + Math.random() * 10 // 55-65°C
+                };
+                lastOverheatTime = now;
+                nextOverheatDelay = getRandomOverheatDelay();
+            }
+
+            // Apply overheating spike if active
+            if (simulatedOverheatEvent) {
+                const elapsed = now - simulatedOverheatEvent.startTime;
+                const progress = elapsed / simulatedOverheatEvent.duration;
+
+                if (progress < 1) {
+                    // Create a spike curve: rise quickly, peak, then cool down
+                    let spikeFactor;
+                    if (progress < 0.3) {
+                        // Rising phase
+                        spikeFactor = progress / 0.3;
+                    } else if (progress < 0.7) {
+                        // Peak phase
+                        spikeFactor = 1;
+                    } else {
+                        // Cooling phase
+                        spikeFactor = 1 - ((progress - 0.7) / 0.3);
+                    }
+
+                    const spikeTemp = simulatedOverheatEvent.peakTemp * spikeFactor;
+                    baseTemp = Math.max(baseTemp, baseTemp + spikeTemp - 30);
+                } else {
+                    // End overheating event
+                    simulatedOverheatEvent = null;
+                }
+            }
+
+            return Math.min(Math.max(baseTemp, 20), 80); // Clamp between 20-80°C
+        }
+
+        // Update statistics
+        function updateStats() {
+            if (historyData.length === 0) return;
+            
+            const max = Math.round(Math.max(...historyData));
+            const min = Math.round(Math.min(...historyData));
+            const avg = Math.round(historyData.reduce((a, b) => a + b, 0) / historyData.length);
+
+            document.getElementById('maxTemp').textContent = max;
+            document.getElementById('minTemp').textContent = min;
+            document.getElementById('avgTemp').textContent = avg;
+
+            const current = historyData[historyData.length - 1];
+            const currentTempElem = document.getElementById('currentTemp');
+            currentTempElem.textContent = `${current.toFixed(1)} °C`;
+
+            // Update alert status
+            if (current >= 60) {
+                currentTempElem.className = "current-temp critical";
+                document.getElementById('alertMsg').textContent = "CRITICAL: Overheating!";
+            } else if (current >= OVERHEAT_THRESHOLD) {
+                currentTempElem.className = "current-temp warning";
+                document.getElementById('alertMsg').textContent = "Warning: High temperature!";
+            } else {
+                currentTempElem.className = "current-temp safe";
+                document.getElementById('alertMsg').textContent = "Temperature is normal.";
+            }
+        }
+
+        // Add new data point
+        function addDataPoint(temp) {
+            const now = Date.now();
+            const timeLabel = new Date(now).toLocaleTimeString();
+
+            // Store data
+            historyLabels.push(timeLabel);
+            historyData.push(temp);
+            historyTimestamps.push(now);
+
+            // Track overheating events
+            checkOverheatingEvent(temp, now);
+
+            // Update displays
+            updateChartMode();
+            updateStats();
+
+            // Update trend mode if active
+            if (getCurrentMode() === 'trend') {
+                updateEventsLog();
+            }
+        }
+
+        // Mode cycling
+        function cycleMode() {
+            currentModeIndex = (currentModeIndex + 1) % MODES.length;
+            const nextMode = MODES[(currentModeIndex + 1) % MODES.length];
+            
+            let buttonText;
+            switch (nextMode) {
+                case 'live': buttonText = 'Switch to Live Mode'; break;
+                case 'history': buttonText = 'Switch to History Mode'; break;
+                case 'trend': buttonText = 'Switch to Trend Mode'; break;
+            }
+            
+            document.getElementById('toggleModeBtn').textContent = buttonText;
+            updateChartMode();
+        }
+
+        // Initialize everything
+        function initialize() {
+            initMainChart();
+            initTimelineChart();
+            updateChartMode();
+
+            // Start temperature simulation
+            setInterval(() => {
+                const newTemp = generateTemperature();
+                addDataPoint(newTemp);
+            }, 1000);
+
+            // Mode toggle button
+            document.getElementById('toggleModeBtn').addEventListener('click', cycleMode);
+        }
+
+        // Start the application
+        initialize();
+    </script>
 </body>
 </html>
