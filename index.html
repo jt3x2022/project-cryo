@@ -3,17 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Temperature Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <title>Live Temperature</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    canvas { max-width: 100%; height: auto; }
-    h1 { text-align: center; }
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f0f0f0;
+      margin: 0;
+    }
+    h1 { font-size: 2em; margin-bottom: 20px; }
+    #tempValue {
+      font-size: 5em;
+      color: red;
+    }
   </style>
 </head>
 <body>
-  <h1>Live Temperature Dashboard</h1>
-  <canvas id="tempChart"></canvas>
+  <h1>Current Temperature</h1>
+  <div id="tempValue">-- °C</div>
 
   <script src="script.js"></script>
 </body>
